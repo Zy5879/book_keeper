@@ -15,10 +15,23 @@ import (
 )
 
 
+type IsCompleted string
+
+const (
+	Active IsCompleted = "active"
+	Finished IsCompleted = "finished"
+)
+
+
 type Book struct {
 	Id string `json:"id"`
 	Author string `json:"author"`
 	Title string `json:"title"`
+	Status IsCompleted `json:"isCompleted"`
+}
+
+type BookUpdateReq struct {
+	Status *IsCompleted `json:"status"`
 }
 
 type BookHandler struct {
@@ -56,7 +69,7 @@ func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
 
 	defer r.Body.Close()
 
-	 row, err := bh.db.Query(r.Context(), "INSERT INTO books VALUES($1, $2, $3)", book.Id, book.Author, book.Title)
+	 row, err := bh.db.Query(r.Context(), "INSERT INTO books VALUES($1, $2, $3, $4)", book.Id, book.Author, book.Title, book.Status)
 	 if err != nil {
 		log.Println("error while inserting into database")
 		return
@@ -67,7 +80,6 @@ func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
 
 	 w.WriteHeader(http.StatusCreated)
 	 w.Write(bookJson)
-	
 }
 
 func (bh *BookHandler) DeleteBook(w http.ResponseWriter, r *http.Request) {
@@ -81,13 +93,14 @@ func (bh *BookHandler) DeleteBook(w http.ResponseWriter, r *http.Request) {
 	`
 		DELETE FROM books
 		WHERE id = $1
-		RETURNING id, author, title
+		RETURNING id, author, title, status
 	`,
 	id,
 	).Scan(
 	&deletedBook.Id,
 	&deletedBook.Author,
 	&deletedBook.Title,
+	&deletedBook.Status,
 	)
 
 	if err != nil {
@@ -97,6 +110,50 @@ func (bh *BookHandler) DeleteBook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (bh *BookHandler) UpdateBookStatusById(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var updateBook Book
+	var req BookUpdateReq
+
+	defer r.Body.Close()
+
+	err := bh.db.QueryRow(r.Context(), "UPDATE books SET status WHERE id = $1 RETURNING id, author, title, status;", id).Scan(
+		&updateBook.Id,
+		&updateBook.Author,
+		&updateBook.Title,
+		&updateBook.Status,
+	);
+
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write(fmt.Appendf(nil, "Failed to get book by id: %s, %s",id, err))
+		return
+	}
+
+	log.Println("TABLE UPDATED WITH NEW STATUS")
+
+	err = json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+	}
+
+	if req.Status != nil {
+		updateBook.Status = *req.Status
+	}
+
+	bookJson, err := json.Marshal(updateBook)
+	if err != nil {
+		log.Println("Error marshalling book")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write(bookJson)
 }
 
 func (bh *BookHandler) GetBooks(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +171,7 @@ func (bh *BookHandler) GetBooks(w http.ResponseWriter, r *http.Request) {
 
 	for rows.Next() {
 		var book Book
-		if err := rows.Scan(&book.Id, &book.Author, &book.Title); err != nil {
+		if err := rows.Scan(&book.Id, &book.Author, &book.Title, &book.Status); err != nil {
 			return
 		}
 		books = append(books, book)
@@ -168,6 +225,7 @@ func main() {
 		r.Get("/", bookHandler.GetBooks)
 		r.Post("/", bookHandler.AddBook)
 		r.Delete("/{id}", bookHandler.DeleteBook)
+		r.Patch("/{id}",bookHandler.UpdateBookStatusById)
 	})
 
 	log.Printf("server starting at 8080")
