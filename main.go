@@ -57,7 +57,8 @@ func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
 	
 	err := json.NewDecoder(r.Body).Decode(&book)
 	if err != nil {
-		log.Println("Error decoding: ", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(fmt.Appendf(nil, "unable to decode request body: %s", err))
 		return
 	}
 
@@ -87,7 +88,8 @@ func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
 
 	 row, err := bh.db.Query(r.Context(), "INSERT INTO books VALUES($1, $2, $3, $4)", book.Id, book.Author, book.Title, book.Status)
 	 if err != nil {
-		log.Println("error while inserting into database")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write(fmt.Appendf(nil, "Unable to find row: %s" ,err))
 		return
 	 }
 
@@ -139,6 +141,7 @@ func (bh *BookHandler) UpdateBookStatusById(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
+		return
 	}
 
 	if req.Status == nil  {
@@ -203,6 +206,8 @@ func (bh *BookHandler) GetBooks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err = rows.Err(); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write(fmt.Appendf(nil, "Unable to find row: %s" , err))
 		return
 	}
 
