@@ -184,6 +184,34 @@ func (bh *BookHandler) UpdateBookStatusById(w http.ResponseWriter, r *http.Reque
 	w.Write(bookJson)
 }
 
+func (bh *BookHandler) GetBookById(w http.ResponseWriter, r *http.Request) {
+	var book Book;
+	id := chi.URLParam(r, "id")
+
+	err := bh.db.QueryRow(r.Context(), "SELECT * FROM books WHERE id = $1;", id).Scan(
+		&book.Id,
+		&book.Author,
+		&book.Title,
+		&book.Status,
+	)
+	if err != nil {
+		log.Println("Cannot find row")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(fmt.Appendf(nil, "Cannot find row with id: %s, err: %s", id, err))
+		return
+	}
+
+	booksJson, err := json.Marshal(book)
+	if err != nil {
+		log.Println("Error producing json: ", err)
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
+	w.Write(booksJson)
+	w.WriteHeader(http.StatusFound)
+}
+
 func (bh *BookHandler) GetBooks(w http.ResponseWriter, r *http.Request) {
 	var books []Book;
 
@@ -253,6 +281,7 @@ func main() {
 
 	r.Route("/api/library", func(r chi.Router) {
 		r.Get("/", bookHandler.GetBooks)
+		r.Get("/{id}", bookHandler.GetBookById)
 		r.Post("/", bookHandler.AddBook)
 		r.Delete("/{id}", bookHandler.DeleteBook)
 		r.Patch("/{id}",bookHandler.UpdateBookStatusById)
