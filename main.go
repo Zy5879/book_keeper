@@ -27,7 +27,7 @@ type Book struct {
 	Id string `json:"id"`
 	Author string `json:"author"`
 	Title string `json:"title"`
-	Status IsCompleted `json:"isCompleted"`
+	Status IsCompleted `json:"status"`
 }
 
 type BookUpdateReq struct {
@@ -40,6 +40,16 @@ type BookHandler struct {
 
 func NewBookHandler(db *pgxpool.Pool) *BookHandler {
 	return &BookHandler{db: db}
+}
+
+func (b IsCompleted) Valid() bool {
+	switch b {
+	case Active, Finished:
+		return true
+	default:
+		return false
+	
+	}
 }
 
 func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +66,12 @@ func (bh *BookHandler) AddBook(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(
 			 "Missing required fields in Book Struct",
 		))
+		return
+	}
+
+	if book.Status.Valid() == false {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(fmt.Appendf(nil, "status not vaild: %s", book.Status))
 		return
 	}
 
@@ -119,7 +135,26 @@ func (bh *BookHandler) UpdateBookStatusById(w http.ResponseWriter, r *http.Reque
 
 	defer r.Body.Close()
 
-	err := bh.db.QueryRow(r.Context(), "UPDATE books SET status WHERE id = $1 RETURNING id, author, title, status;", id).Scan(
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+	}
+
+	if req.Status == nil  {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("No Status sent in request"))
+		return
+	}
+
+	if !(req.Status.Valid()) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte("Status does not match expected type"))
+		return
+
+	}
+
+	err = bh.db.QueryRow(r.Context(), "UPDATE books SET status = $1 WHERE id = $2 RETURNING id, author, title, status;",*req.Status, id).Scan(
 		&updateBook.Id,
 		&updateBook.Author,
 		&updateBook.Title,
@@ -128,21 +163,11 @@ func (bh *BookHandler) UpdateBookStatusById(w http.ResponseWriter, r *http.Reque
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write(fmt.Appendf(nil, "Failed to get book by id: %s, %s",id, err))
+		w.Write(fmt.Appendf(nil, "Failed to update book by id: %s, %s",id, err))
 		return
 	}
 
 	log.Println("TABLE UPDATED WITH NEW STATUS")
-
-	err = json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(err.Error()))
-	}
-
-	if req.Status != nil {
-		updateBook.Status = *req.Status
-	}
 
 	bookJson, err := json.Marshal(updateBook)
 	if err != nil {
